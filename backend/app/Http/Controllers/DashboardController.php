@@ -21,34 +21,34 @@ class DashboardController extends Controller
             $currentMonth = now()->month;
             $currentYear = now()->year;
 
-            // Общий баланс по всем счетам
-            $totalBalance = Account::where('user_id', $user->id)->sum('balance');
+            // 1. Общий баланс по всем счетам (с проверкой на null)
+            $totalBalance = Account::where('user_id', $user->id)->sum('balance') ?? 0;
 
-            // Доходы и расходы за сегодня
+            // 2. Доходы и расходы за сегодня
             $todayIncome = Transaction::where('user_id', $user->id)
                 ->where('type', 'income')
                 ->whereDate('date', $today)
-                ->sum('amount');
+                ->sum('amount') ?? 0;
 
             $todayExpense = Transaction::where('user_id', $user->id)
                 ->where('type', 'expense')
                 ->whereDate('date', $today)
-                ->sum('amount');
+                ->sum('amount') ?? 0;
 
-            // Доходы и расходы за текущий месяц
+            // 3. Доходы и расходы за текущий месяц
             $monthIncome = Transaction::where('user_id', $user->id)
                 ->where('type', 'income')
                 ->whereMonth('date', $currentMonth)
                 ->whereYear('date', $currentYear)
-                ->sum('amount');
+                ->sum('amount') ?? 0;
 
             $monthExpense = Transaction::where('user_id', $user->id)
                 ->where('type', 'expense')
                 ->whereMonth('date', $currentMonth)
                 ->whereYear('date', $currentYear)
-                ->sum('amount');
+                ->sum('amount') ?? 0;
 
-            // Расходы по категориям за текущий месяц
+            // 4. Расходы по категориям за текущий месяц
             $expensesByCategory = Transaction::where('user_id', $user->id)
                 ->where('type', 'expense')
                 ->whereMonth('date', $currentMonth)
@@ -59,7 +59,7 @@ class DashboardController extends Controller
                 ->orderBy('total', 'desc')
                 ->get();
 
-            // Доходы по категориям за текущий месяц
+            // 5. Доходы по категориям за текущий месяц
             $incomesByCategory = Transaction::where('user_id', $user->id)
                 ->where('type', 'income')
                 ->whereMonth('date', $currentMonth)
@@ -70,7 +70,7 @@ class DashboardController extends Controller
                 ->orderBy('total', 'desc')
                 ->get();
 
-            // Динамика доходов/расходов за последние 6 месяцев
+            // 6. Динамика доходов/расходов за последние 6 месяцев
             $monthlyStats = [];
             for ($i = 5; $i >= 0; $i--) {
                 $month = now()->subMonths($i);
@@ -78,13 +78,13 @@ class DashboardController extends Controller
                     ->where('type', 'income')
                     ->whereYear('date', $month->year)
                     ->whereMonth('date', $month->month)
-                    ->sum('amount');
+                    ->sum('amount') ?? 0;
 
                 $expense = Transaction::where('user_id', $user->id)
                     ->where('type', 'expense')
                     ->whereYear('date', $month->year)
                     ->whereMonth('date', $month->month)
-                    ->sum('amount');
+                    ->sum('amount') ?? 0;
 
                 $monthlyStats[] = [
                     'month' => $month->format('M Y'),
@@ -93,7 +93,7 @@ class DashboardController extends Controller
                 ];
             }
 
-            // Последние 10 транзакций
+            // 7. Последние 10 транзакций
             $recentTransactions = Transaction::where('user_id', $user->id)
                 ->with(['category', 'account'])
                 ->orderBy('date', 'desc')
@@ -101,21 +101,21 @@ class DashboardController extends Controller
                 ->limit(10)
                 ->get();
 
-            // Прогресс бюджетов
+            // 8. Прогресс бюджетов (только если есть бюджеты)
+            $budgetProgress = [];
             $budgets = Budget::where('user_id', $user->id)
                 ->where('month', $currentMonth)
                 ->where('year', $currentYear)
                 ->with('category')
                 ->get();
 
-            $budgetProgress = [];
             foreach ($budgets as $budget) {
                 $spent = Transaction::where('user_id', $user->id)
                     ->where('type', 'expense')
                     ->where('category_id', $budget->category_id)
                     ->whereMonth('date', $currentMonth)
                     ->whereYear('date', $currentYear)
-                    ->sum('amount');
+                    ->sum('amount') ?? 0;
 
                 $budgetProgress[] = [
                     'budget' => $budget,
@@ -125,6 +125,7 @@ class DashboardController extends Controller
                 ];
             }
 
+            // Формируем ответ с проверкой на null
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -138,19 +139,22 @@ class DashboardController extends Controller
                         'expense' => $monthExpense,
                         'balance' => $monthIncome - $monthExpense
                     ],
-                    'expenses_by_category' => $expensesByCategory,
-                    'incomes_by_category' => $incomesByCategory,
-                    'monthly_stats' => $monthlyStats,
-                    'recent_transactions' => $recentTransactions,
-                    'budget_progress' => $budgetProgress
+                    'expenses_by_category' => $expensesByCategory ?: [],
+                    'incomes_by_category' => $incomesByCategory ?: [],
+                    'monthly_stats' => $monthlyStats ?: [],
+                    'recent_transactions' => $recentTransactions ?: [],
+                    'budget_progress' => $budgetProgress ?: []
                 ]
             ]);
 
         } catch (\Exception $e) {
+            // Логируем ошибку для отладки
+            \Log::error('Dashboard error: ' . $e->getMessage());
+            \Log::error($e->getTraceAsString());
+
             return response()->json([
                 'success' => false,
-                'message' => 'Произошла ошибка при загрузке дашборда',
-                'error' => $e->getMessage()
+                'message' => 'Ошибка при загрузке дашборда: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -162,7 +166,7 @@ class DashboardController extends Controller
     {
         try {
             $user = $request->user();
-            $period = $request->get('period', 'month'); // week, month, year
+            $period = $request->get('period', 'month');
 
             $startDate = now();
             $endDate = now();
@@ -185,12 +189,12 @@ class DashboardController extends Controller
             $income = Transaction::where('user_id', $user->id)
                 ->where('type', 'income')
                 ->whereBetween('date', [$startDate, $endDate])
-                ->sum('amount');
+                ->sum('amount') ?? 0;
 
             $expense = Transaction::where('user_id', $user->id)
                 ->where('type', 'expense')
                 ->whereBetween('date', [$startDate, $endDate])
-                ->sum('amount');
+                ->sum('amount') ?? 0;
 
             return response()->json([
                 'success' => true,
@@ -205,6 +209,8 @@ class DashboardController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            \Log::error('Stats error: ' . $e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Произошла ошибка'

@@ -51,8 +51,8 @@ class TransactionController extends Controller
             $transactions = $query->paginate($request->get('per_page', 20));
 
             // Добавляем общую сумму
-            $totalIncome = $query->clone()->where('type', 'income')->sum('amount');
-            $totalExpense = $query->clone()->where('type', 'expense')->sum('amount');
+            $totalIncome = $query->clone()->where('type', 'income')->sum('amount') ?? 0;
+            $totalExpense = $query->clone()->where('type', 'expense')->sum('amount') ?? 0;
 
             return response()->json([
                 'success' => true,
@@ -65,9 +65,11 @@ class TransactionController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            \Log::error('Transactions error: ' . $e->getMessage());
+
             return response()->json([
                 'success' => false,
-                'message' => 'Ошибка при загрузке транзакций'
+                'message' => 'Ошибка при загрузке транзакций: ' . $e->getMessage()
             ], 500);
         }
     }
